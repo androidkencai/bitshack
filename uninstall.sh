@@ -43,21 +43,32 @@ fi
 echo
 echo "==> verifying clean state"
 ok=1
-check() {
-    local label="$1" cmd="$2" expected="$3"
-    local got
-    got="$(eval "$cmd" 2>&1)"
-    if [[ "$got" == "$expected" ]]; then
-        printf "    ✓ %s\n" "$label"
-    else
-        printf "    ✗ %s — got: %s\n" "$label" "$got"
-        ok=0
-    fi
-}
-check "no .app in /Applications"           "ls -d '$APP_PATH' 2>&1 || echo absent" "absent"
-check "no LaunchAgent plist"               "ls '$PLIST_PATH' 2>&1 || echo absent" "absent"
-check "no pkgutil receipt"                 "pkgutil --pkg-info '$BUNDLE_ID' 2>&1 | head -1 || echo absent" "No receipt for '$BUNDLE_ID' found at '/'."
-check "no launchd job loaded"              "launchctl list | grep -c '$BUNDLE_ID' || true" "0"
+fail() { printf "    ✗ %s — %s\n" "$1" "$2"; ok=0; }
+pass() { printf "    ✓ %s\n"      "$1"; }
+
+# .app should be gone
+[[ ! -e "$APP_PATH" ]] \
+    && pass "no .app in /Applications" \
+    || fail "no .app in /Applications" "still present at $APP_PATH"
+
+# Plist should be gone
+[[ ! -e "$PLIST_PATH" ]] \
+    && pass "no LaunchAgent plist" \
+    || fail "no LaunchAgent plist" "still present at $PLIST_PATH"
+
+# pkgutil should not know about the receipt
+if pkgutil --pkg-info "$BUNDLE_ID" >/dev/null 2>&1; then
+    fail "no pkgutil receipt" "receipt still registered (run: sudo pkgutil --forget $BUNDLE_ID)"
+else
+    pass "no pkgutil receipt"
+fi
+
+# launchd should have no job loaded
+if launchctl list | grep -q "$BUNDLE_ID"; then
+    fail "no launchd job loaded" "still listed in launchctl"
+else
+    pass "no launchd job loaded"
+fi
 
 cat <<EOF
 
