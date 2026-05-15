@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Uninstall Safari History Agent from this Mac.
+# Uninstall Parents Hand from this Mac.
 #
 # Removes: the launchd job, the .app, the LaunchAgent plist, and the
 # pkgutil receipt — leaving the Mac in the same state as if the .pkg had
@@ -11,11 +11,11 @@
 
 set -uo pipefail
 
-BUNDLE_ID="io.github.androidkc.safari-history-poc"
-APP_NAME="Safari History Agent"
+BUNDLE_ID="io.github.androidkc.parentshand"
+APP_NAME="Parents Hand"
 PLIST_PATH="/Library/LaunchAgents/${BUNDLE_ID}.plist"
 APP_PATH="/Applications/${APP_NAME}.app"
-LOG_DIR="$HOME/Library/Logs/safari-history-agent"
+LOG_DIR="$HOME/Library/Logs/parentshand"
 
 PURGE_LOGS=0
 if [[ "${1:-}" == "--purge-logs" ]]; then
