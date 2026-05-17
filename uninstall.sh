@@ -1,42 +1,52 @@
 #!/usr/bin/env bash
 # Uninstall Parents Hand from this Mac.
 #
-# Removes: the launchd job, the .app, the LaunchAgent plist, and the
+# Removes: the LaunchDaemon job, the .app, the LaunchDaemon plist,
+# the /var/log/parentshand and /var/db/parentshand directories, and the
 # pkgutil receipt — leaving the Mac in the same state as if the .pkg had
-# never been installed (with two exceptions: the FDA entry in System
-# Settings and the per-user log files, both of which the script tells you
-# how to clean up at the end).
+# never been installed. The FDA entry in System Settings is the one thing
+# the script can't touch; instructions at the end.
 #
-# Logs are preserved by default. Pass --purge-logs to remove those too.
+# Logs and state are preserved by default. Pass --purge-logs to wipe those.
 
 set -uo pipefail
 
 BUNDLE_ID="io.github.androidkc.parentshand"
 APP_NAME="Parents Hand"
-PLIST_PATH="/Library/LaunchAgents/${BUNDLE_ID}.plist"
+PLIST_PATH="/Library/LaunchDaemons/${BUNDLE_ID}.plist"
+LEGACY_AGENT_PLIST="/Library/LaunchAgents/${BUNDLE_ID}.plist"   # pre-ADR-0010
 APP_PATH="/Applications/${APP_NAME}.app"
-LOG_DIR="$HOME/Library/Logs/parentshand"
+LOG_DIR="/var/log/parentshand"
+STATE_DIR="/var/db/parentshand"
 
 PURGE_LOGS=0
 if [[ "${1:-}" == "--purge-logs" ]]; then
     PURGE_LOGS=1
 fi
 
-echo "==> unloading launchd job (no sudo needed)"
-launchctl bootout "gui/$(id -u)/${BUNDLE_ID}" 2>/dev/null || true
+echo "==> unloading launchd jobs (admin password required)"
+sudo launchctl bootout "system/${BUNDLE_ID}" 2>/dev/null || true
+# Also clean up any legacy LaunchAgent from pre-ADR-0010 installs.
+CONSOLE_USER=$(stat -f%Su /dev/console)
+CONSOLE_UID=$(id -u "$CONSOLE_USER" 2>/dev/null || echo "")
+if [[ -n "$CONSOLE_UID" ]]; then
+    sudo launchctl bootout "gui/${CONSOLE_UID}/${BUNDLE_ID}" 2>/dev/null || true
+fi
 
-echo "==> removing system files (admin password required)"
+echo "==> removing system files"
 sudo rm -f "$PLIST_PATH"
+sudo rm -f "$LEGACY_AGENT_PLIST"
 sudo rm -rf "$APP_PATH"
 
 echo "==> forgetting pkgutil receipt"
 sudo pkgutil --forget "$BUNDLE_ID" 2>/dev/null || true
 
 if (( PURGE_LOGS == 1 )); then
-    echo "==> removing logs"
-    rm -rf "$LOG_DIR"
+    echo "==> removing logs and state"
+    sudo rm -rf "$LOG_DIR" "$STATE_DIR"
 else
-    echo "    logs preserved at: $LOG_DIR"
+    echo "    logs preserved at:  $LOG_DIR"
+    echo "    state preserved at: $STATE_DIR"
     echo "    (pass --purge-logs to also delete them)"
 fi
 
@@ -51,10 +61,13 @@ pass() { printf "    ✓ %s\n"      "$1"; }
     && pass "no .app in /Applications" \
     || fail "no .app in /Applications" "still present at $APP_PATH"
 
-# Plist should be gone
+# Plist should be gone (both new and legacy locations)
 [[ ! -e "$PLIST_PATH" ]] \
-    && pass "no LaunchAgent plist" \
-    || fail "no LaunchAgent plist" "still present at $PLIST_PATH"
+    && pass "no LaunchDaemon plist" \
+    || fail "no LaunchDaemon plist" "still present at $PLIST_PATH"
+[[ ! -e "$LEGACY_AGENT_PLIST" ]] \
+    && pass "no legacy LaunchAgent plist" \
+    || fail "no legacy LaunchAgent plist" "still present at $LEGACY_AGENT_PLIST"
 
 # pkgutil should not know about the receipt
 if pkgutil --pkg-info "$BUNDLE_ID" >/dev/null 2>&1; then
@@ -64,8 +77,8 @@ else
 fi
 
 # launchd should have no job loaded
-if launchctl list | grep -q "$BUNDLE_ID"; then
-    fail "no launchd job loaded" "still listed in launchctl"
+if sudo launchctl print "system/${BUNDLE_ID}" >/dev/null 2>&1; then
+    fail "no launchd job loaded" "still loaded in system domain"
 else
     pass "no launchd job loaded"
 fi
